@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Wake-on-LAN control for your PC">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="WoL Control">
+    <title>Wake-on-LAN Control</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"></circle>
+                    <path d="M12 9v6"></path>
+                    <path d="M4.22 4.22a10 10 0 0 0 0 14.14"></path>
+                    <path d="M19.78 19.78a10 10 0 0 0 0-14.14"></path>
+                </svg>
+            </div>
+            <h1>Wake PC</h1>
+            <p id="status" class="status">Ready</p>
+            <button id="wakeBtn" class="btn btn-primary">Wake PC</button>
+            <button id="statusBtn" class="btn btn-secondary">Check Status</button>
+
+            <div id="message" class="message"></div>
+
+            <div class="info">
+                <small>Last wake: <span id="lastWake">Never</span></small>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err =>
+                console.log('Service Worker registration failed:', err)
+            );
+        }
+    </script>
+</body>
+</html>

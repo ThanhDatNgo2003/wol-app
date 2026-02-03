@@ -1,0 +1,38 @@
+[Unit]
+Description=Wake-on-LAN PWA Application
+Documentation=https://github.com/yourname/wol-app
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/wol-app
+EnvironmentFile=/home/pi/wol-app/.env
+
+# Node.js environment
+Environment="NODE_ENV=production"
+
+# Start command
+ExecStart=/usr/bin/node server/index.js
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=5
+
+# Security
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+# Process limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=wol-app
+
+[Install]
+WantedBy=multi-user.target
