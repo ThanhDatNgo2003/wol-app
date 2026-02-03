@@ -18,9 +18,23 @@ class WoLApp {
     }
 
     async wakePC() {
+        const wakeBtnText = document.getElementById('wakeBtnText');
+        const wakeBtnSpinner = document.getElementById('wakeBtnSpinner');
+
+        // Smooth transition to loading state
         this.wakeBtn.classList.add('loading');
         this.wakeBtn.disabled = true;
         this.clearMessage();
+
+        // Fade text out, spinner in
+        wakeBtnText.style.transition = 'opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+        wakeBtnText.style.opacity = '0';
+
+        setTimeout(() => {
+            wakeBtnText.style.display = 'none';
+            wakeBtnSpinner.style.display = 'inline-block';
+            wakeBtnSpinner.style.opacity = '1';
+        }, 150);
 
         try {
             const response = await fetch(`${API_URL}/wake`, {
@@ -33,23 +47,35 @@ class WoLApp {
             const data = await response.json();
 
             if (response.ok) {
-                this.showMessage('PC wake signal sent!', 'success');
+                this.showMessage('✓ PC wake signal sent!', 'success');
                 this.statusEl.textContent = 'Wake signal sent';
+                this.statusEl.classList.remove('error');
                 this.statusEl.classList.add('active');
                 this.updateLastWake();
             } else {
-                this.showMessage(data.error || 'Failed to send wake signal', 'error');
+                this.showMessage('✗ ' + (data.error || 'Failed to send wake signal'), 'error');
                 this.statusEl.textContent = 'Error sending signal';
+                this.statusEl.classList.remove('active');
                 this.statusEl.classList.add('error');
             }
         } catch (error) {
             console.error('Error:', error);
-            this.showMessage('Network error: ' + error.message, 'error');
+            this.showMessage('✗ Network error: ' + error.message, 'error');
             this.statusEl.textContent = 'Network error';
+            this.statusEl.classList.remove('active');
             this.statusEl.classList.add('error');
         } finally {
-            this.wakeBtn.classList.remove('loading');
-            this.wakeBtn.disabled = false;
+            // Fade spinner out, text back in
+            wakeBtnSpinner.style.transition = 'opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            wakeBtnSpinner.style.opacity = '0';
+
+            setTimeout(() => {
+                wakeBtnSpinner.style.display = 'none';
+                wakeBtnText.style.display = 'inline';
+                wakeBtnText.style.opacity = '1';
+                this.wakeBtn.classList.remove('loading');
+                this.wakeBtn.disabled = false;
+            }, 150);
         }
     }
 
