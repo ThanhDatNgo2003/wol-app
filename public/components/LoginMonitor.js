@@ -38,10 +38,24 @@ class LoginMonitor {
 
   maskIP(ip) {
     if (!ip) return 'Unknown';
+
+    // Handle IPv6 localhost
+    if (ip === '::1' || ip === '127.0.0.1') {
+      return 'Local Network';
+    }
+
+    // Handle IPv4 addresses
     const parts = ip.split('.');
     if (parts.length === 4) {
       return `${parts[0]}.${parts[1]}.*.${parts[3]}`;
     }
+
+    // Handle other IPv6 addresses
+    if (ip.includes(':')) {
+      const segments = ip.split(':').slice(0, 2).join(':');
+      return `${segments}:*`;
+    }
+
     return ip;
   }
 
