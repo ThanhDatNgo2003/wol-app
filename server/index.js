@@ -195,6 +195,35 @@ const isBruteForceSuspect = (ip) => {
          Date.now() - attempt.firstAttempt < BRUTE_FORCE_WINDOW;
 };
 
+// ============================================
+// Server-side Login History Storage
+// ============================================
+const loginSessions = [];
+const MAX_SESSIONS = 100;
+
+const recordLoginSession = (ip, userAgent) => {
+  const session = {
+    id: Date.now().toString(),
+    ip,
+    userAgent,
+    loginTime: new Date().toISOString(),
+    timestamp: Date.now()
+  };
+
+  loginSessions.unshift(session);
+
+  // Keep only last 100 sessions
+  if (loginSessions.length > MAX_SESSIONS) {
+    loginSessions.pop();
+  }
+
+  return session;
+};
+
+const getLoginSessions = (limit = 100) => {
+  return loginSessions.slice(0, limit);
+};
+
 // Logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - ${req.ip}`);
@@ -250,6 +279,10 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
 
     // Check if this is a new device (first time from this IP)
     const isNewDevice = !req.session || !req.session.ip || req.session.ip !== clientIP;
+
+    // Record login session on server
+    const userAgent = req.headers['user-agent'] || 'Unknown';
+    recordLoginSession(clientIP, userAgent);
 
     // Create session
     req.session.authenticated = true;
@@ -317,6 +350,21 @@ app.get('/api/auth/status', (req, res) => {
     sessionAge: req.session && req.session.createdAt
       ? Date.now() - req.session.createdAt
       : null
+  });
+});
+
+/**
+ * GET /api/auth/sessions
+ * Get login history (requires authentication)
+ */
+app.get('/api/auth/sessions', requireAuth, (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  const sessions = getLoginSessions(limit);
+
+  res.json({
+    success: true,
+    sessions: sessions,
+    total: loginSessions.length
   });
 });
 

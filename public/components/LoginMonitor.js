@@ -1,36 +1,73 @@
 /**
  * Login Monitor Component
- * Displays login history, session activity, and suspicious login attempts
+ * Displays recent login history and suspicious login attempts
  */
 class LoginMonitor {
   constructor(container) {
     this.container = container;
+    this.sessions = [];
+  }
+
+  async loadSessions() {
+    this.sessions = await window.app.authManager.getLoginSessions(5);
+  }
+
+  parseUserAgent(userAgent) {
+    if (!userAgent) return { device: 'Unknown Device', browser: 'Unknown' };
+
+    const ua = userAgent;
+    let device = 'Unknown Device';
+
+    // Device detection
+    if (/iPad/.test(ua)) {
+      device = 'iPad';
+    } else if (/iPhone/.test(ua)) {
+      device = 'iPhone';
+    } else if (/Android/.test(ua)) {
+      device = 'Android Phone';
+    } else if (/Windows/.test(ua)) {
+      device = 'Windows PC';
+    } else if (/Macintosh|Mac OS X/.test(ua)) {
+      device = 'macOS';
+    } else if (/Linux/.test(ua)) {
+      device = 'Linux';
+    }
+
+    return { device };
+  }
+
+  maskIP(ip) {
+    if (!ip) return 'Unknown';
+    const parts = ip.split('.');
+    if (parts.length === 4) {
+      return `${parts[0]}.${parts[1]}.*.${parts[3]}`;
+    }
+    return ip;
   }
 
   render() {
-    const loginHistory = window.storage.getLoginHistory();
-    const suspiciousAttempts = window.storage.getSuspiciousAttempts();
-
     let historyHtml = '';
-    if (loginHistory.length === 0) {
+    if (this.sessions.length === 0) {
       historyHtml = '<p class="no-activity">No login history</p>';
     } else {
-      historyHtml = loginHistory.slice(0, 5).map(session => {
-        const isNewDevice = session.isNew ? ' (New Device)' : '';
-        const statusClass = session.isNew ? 'login-new-device' : 'login-known';
+      historyHtml = this.sessions.map(session => {
+        const { device } = this.parseUserAgent(session.userAgent);
+        const loginDate = new Date(session.loginTime);
+        const formattedTime = loginDate.toLocaleTimeString();
         return `
-          <div class="login-item ${statusClass}">
-            <span class="login-icon">${session.isNew ? '⚠️' : '✓'}</span>
+          <div class="login-item login-known">
+            <span class="login-icon">✓</span>
             <div class="login-details">
               <span class="login-ip">${this.maskIP(session.ip)}</span>
-              <span class="login-device">${session.device}${isNewDevice}</span>
+              <span class="login-device">${device}</span>
             </div>
-            <span class="login-time">${session.loginTime}</span>
+            <span class="login-time">${formattedTime}</span>
           </div>
         `;
       }).join('');
     }
 
+    const suspiciousAttempts = window.storage.getSuspiciousAttempts();
     let suspiciousHtml = '';
     if (suspiciousAttempts.length > 0) {
       suspiciousHtml = `
@@ -57,7 +94,8 @@ class LoginMonitor {
     return `
       <div class="login-monitor">
         <div class="monitor-header">
-          <h3>Login History</h3>
+          <h3>Recent Logins</h3>
+          <button class="btn-view-all" onclick="window.app.loginHistoryModal.open()">View All</button>
         </div>
         <div class="login-list">
           ${historyHtml}
@@ -67,16 +105,8 @@ class LoginMonitor {
     `;
   }
 
-  maskIP(ip) {
-    if (!ip) return 'Unknown';
-    const parts = ip.split('.');
-    if (parts.length === 4) {
-      return `${parts[0]}.${parts[1]}.*.${parts[3]}`;
-    }
-    return ip;
-  }
-
-  update() {
+  async update() {
+    await this.loadSessions();
     if (this.container) {
       this.container.innerHTML = this.render();
     }

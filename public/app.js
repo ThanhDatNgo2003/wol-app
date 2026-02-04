@@ -7,6 +7,7 @@ class WoLApp {
     this.authManager = new AuthManager();
     this.statusCard = null;
     this.loginMonitor = null;
+    this.loginHistoryModal = new LoginHistoryModal();
     this.initApp();
   }
 
@@ -132,7 +133,7 @@ class WoLApp {
     this.loginMonitor = new LoginMonitor(document.getElementById('loginMonitor'));
 
     this.statusCard.update('unknown');
-    this.loginMonitor.update();
+    this.loginMonitor.update(); // async call
 
     this.wakeBtn = document.getElementById('wakeBtn');
     this.statusBtn = document.getElementById('statusBtn');

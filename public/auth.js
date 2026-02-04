@@ -99,4 +99,21 @@ class AuthManager {
   isAuthEnabled() {
     return this.authEnabled;
   }
+
+  async getLoginSessions(limit = 20) {
+    try {
+      const response = await fetch(`/api/auth/sessions?limit=${limit}`, {
+        credentials: 'include'
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        return data.sessions || [];
+      }
+      return [];
+    } catch (error) {
+      console.error('Failed to fetch login sessions:', error);
+      return [];
+    }
+  }
 }
