@@ -6,7 +6,7 @@ class WoLApp {
   constructor() {
     this.authManager = new AuthManager();
     this.statusCard = null;
-    this.activityLog = null;
+    this.loginMonitor = null;
     this.initApp();
   }
 
@@ -96,9 +96,6 @@ class WoLApp {
             <img src="onoff-high-resolution-logo.png" alt="Logo" class="header-logo">
             <h1>Wake-on-LAN Control</h1>
           </div>
-          ${this.authManager.isAuthEnabled() ? `
-            <button class="btn-logout-header" onclick="window.app.handleLogout()">Logout</button>
-          ` : ''}
         </div>
 
         <div class="dashboard-main">
@@ -120,7 +117,7 @@ class WoLApp {
 
           <div class="dashboard-column">
             <div class="card">
-              <div id="activityLog"></div>
+              <div id="loginMonitor"></div>
             </div>
           </div>
         </div>
@@ -132,10 +129,10 @@ class WoLApp {
     `;
 
     this.statusCard = new StatusCard(document.getElementById('statusCard'));
-    this.activityLog = new ActivityLog(document.getElementById('activityLog'));
+    this.loginMonitor = new LoginMonitor(document.getElementById('loginMonitor'));
 
     this.statusCard.update('unknown');
-    this.activityLog.update();
+    this.loginMonitor.update();
 
     this.wakeBtn = document.getElementById('wakeBtn');
     this.statusBtn = document.getElementById('statusBtn');
@@ -175,14 +172,10 @@ class WoLApp {
       this.showMessage('✓ Wake signal sent!', 'success');
       this.statusCard.update('waking');
       this.updateLastWake();
-      window.storage.addActivity('Wake PC', true, 'Signal sent');
-      this.activityLog.update();
       setTimeout(() => this.checkStatus(), 5000);
     } else {
       this.showMessage(`✗ ${data.error}`, 'error');
       this.statusCard.update('error');
-      window.storage.addActivity('Wake PC', false, data.error);
-      this.activityLog.update();
     }
 
     this.wakeBtn.disabled = false;
@@ -209,28 +202,14 @@ class WoLApp {
       const isOnline = data.online;
       this.statusCard.update(isOnline ? 'online' : 'offline');
       this.showMessage(`PC is ${isOnline ? 'online ✓' : 'offline'}`, isOnline ? 'success' : 'info');
-      window.storage.addActivity('Status Check', true, isOnline ? 'Online' : 'Offline');
-      this.activityLog.update();
     } else {
       this.statusCard.update('error');
       this.showMessage(`✗ ${data.error}`, 'error');
-      window.storage.addActivity('Status Check', false, data.error);
-      this.activityLog.update();
     }
 
     this.statusBtn.disabled = false;
   }
 
-  async handleLogout() {
-    await this.authManager.logout();
-    this.showLoginUI();
-  }
-
-  clearActivityLog() {
-    window.storage.clearActivityLog();
-    this.activityLog.update();
-    this.showMessage('Activity log cleared', 'info');
-  }
 
   showMessage(text, type) {
     this.messageEl.textContent = text;

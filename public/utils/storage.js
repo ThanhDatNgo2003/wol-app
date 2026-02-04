@@ -48,26 +48,51 @@ class StorageManager {
 
   // Application-specific methods
 
-  getActivityLog() {
-    return this.get('activityLog', []);
+  // Login History Management
+  getLoginHistory() {
+    return this.get('loginHistory', []);
   }
 
-  addActivity(action, success, message = '') {
-    const log = this.getActivityLog();
-    log.unshift({
-      action,
-      success,
-      message,
+  addLoginSession(ip, device = 'Unknown', isNew = false) {
+    const history = this.getLoginHistory();
+    history.unshift({
+      ip,
+      device,
+      isNew,
+      loginTime: new Date().toLocaleString(),
       timestamp: Date.now()
     });
-
-    // Keep only last 50 entries
-    const trimmed = log.slice(0, 50);
-    this.set('activityLog', trimmed);
+    // Keep last 20 login sessions
+    this.set('loginHistory', history.slice(0, 20));
   }
 
-  clearActivityLog() {
-    this.set('activityLog', []);
+  getSuspiciousAttempts() {
+    return this.get('suspiciousAttempts', []);
+  }
+
+  addSuspiciousAttempt(ip, reason) {
+    const attempts = this.getSuspiciousAttempts();
+    const existingAttempt = attempts.find(a => a.ip === ip);
+
+    if (existingAttempt) {
+      existingAttempt.count += 1;
+      existingAttempt.lastAttempt = Date.now();
+    } else {
+      attempts.push({
+        ip,
+        reason,
+        count: 1,
+        firstAttempt: Date.now(),
+        lastAttempt: Date.now()
+      });
+    }
+
+    // Keep suspicious attempts for 24 hours
+    const filtered = attempts.filter(a => {
+      return Date.now() - a.lastAttempt < 24 * 60 * 60 * 1000;
+    });
+
+    this.set('suspiciousAttempts', filtered);
   }
 
   getLastWake() {

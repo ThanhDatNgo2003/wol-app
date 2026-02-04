@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -167,6 +169,32 @@ const requireAuth = (req, res, next) => {
   });
 };
 
+// IP-based Brute Force Detection
+const ipLoginAttempts = new Map();
+const BRUTE_FORCE_THRESHOLD = 3;
+const BRUTE_FORCE_WINDOW = 5 * 60 * 1000; // 5 minutes
+
+const trackFailedAttempt = (ip) => {
+  if (!ipLoginAttempts.has(ip)) {
+    ipLoginAttempts.set(ip, { count: 0, firstAttempt: Date.now() });
+  }
+  const attempt = ipLoginAttempts.get(ip);
+  attempt.count += 1;
+  attempt.lastAttempt = Date.now();
+
+  // Clean up old entries
+  if (Date.now() - attempt.firstAttempt > BRUTE_FORCE_WINDOW) {
+    ipLoginAttempts.delete(ip);
+  }
+};
+
+const isBruteForceSuspect = (ip) => {
+  if (!ipLoginAttempts.has(ip)) return false;
+  const attempt = ipLoginAttempts.get(ip);
+  return attempt.count >= BRUTE_FORCE_THRESHOLD &&
+         Date.now() - attempt.firstAttempt < BRUTE_FORCE_WINDOW;
+};
+
 // Logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - ${req.ip}`);
@@ -184,11 +212,23 @@ app.use((req, res, next) => {
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { pin } = req.body;
+    const clientIP = req.ip;
 
     if (!pin) {
       return res.status(400).json({
         error: 'PIN is required',
-        success: false
+        success: false,
+        ip: clientIP
+      });
+    }
+
+    // Check for brute force attempts
+    if (isBruteForceSuspect(clientIP)) {
+      console.warn(`[Security] Brute force detected from ${clientIP} - blocking`);
+      return res.status(429).json({
+        error: 'Too many failed attempts. Please wait before trying again.',
+        success: false,
+        ip: clientIP
       });
     }
 
@@ -196,24 +236,34 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     const isValid = await pinManager.verifyPin(pin);
 
     if (!isValid) {
-      console.warn(`[Auth] Failed login attempt from ${req.ip}`);
+      trackFailedAttempt(clientIP);
+      console.warn(`[Auth] Failed login attempt from ${clientIP} (${ipLoginAttempts.get(clientIP)?.count || 1}/${BRUTE_FORCE_THRESHOLD})`);
       return res.status(401).json({
         error: 'Invalid PIN',
-        success: false
+        success: false,
+        ip: clientIP
       });
     }
+
+    // Reset failed attempts on successful login
+    ipLoginAttempts.delete(clientIP);
+
+    // Check if this is a new device (first time from this IP)
+    const isNewDevice = !req.session || !req.session.ip || req.session.ip !== clientIP;
 
     // Create session
     req.session.authenticated = true;
     req.session.createdAt = Date.now();
     req.session.lastActivity = Date.now();
-    req.session.ip = req.ip;
+    req.session.ip = clientIP;
 
-    console.log(`[Auth] Successful login from ${req.ip}`);
+    console.log(`[Auth] Successful login from ${clientIP}${isNewDevice ? ' (New Device)' : ''}`);
 
     res.json({
       success: true,
-      message: 'Authentication successful'
+      message: 'Authentication successful',
+      ip: clientIP,
+      isNewDevice: isNewDevice
     });
 
   } catch (error) {
