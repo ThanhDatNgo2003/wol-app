@@ -1,61 +1,320 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
+const session = require('express-session');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuration
-const USE_SHELL_CMD = process.env.USE_SHELL_CMD === 'true' || true;
-const WAKE_CMD = process.env.WAKE_CMD || 'wakepc';
+// ============================================
+// CRITICAL: Validate environment variables
+// ============================================
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  console.error('[CRITICAL] SESSION_SECRET not set! Exiting...');
+  process.exit(1);
+}
 
-// Middleware
-app.use(cors());
+// Configuration
+const WAKE_CMD = process.env.WAKE_CMD || 'wakepc';
+const PC_IP = process.env.PC_IP;
+
+// Whitelist of allowed commands (prevent injection)
+const ALLOWED_COMMANDS = {
+  'wakepc': '/usr/local/bin/wakepc',
+  'wakeonlan': '/usr/bin/wakeonlan'
+};
+
+// ============================================
+// Session Configuration (before auth)
+// ============================================
+app.use(cookieParser());
+app.use(session({
+  secret: SESSION_SECRET,
+  name: 'wol.sid',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours max
+    sameSite: 'strict'
+  }
+}));
+
+// ============================================
+// Security Middleware
+// ============================================
+
+// CORS Hardening
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : ['https://wol.thanhdatngo.site'],
+  credentials: true,
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
+};
+app.use(cors(corsOptions));
+
+// Security Headers
+const helmet = require('helmet');
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+}));
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
+// ============================================
+// Rate Limiting
+// ============================================
+const rateLimit = require('express-rate-limit');
+
+const wakeLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: 'Too many wake requests. Please wait before trying again.', success: false },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const statusLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many status checks. Please slow down.', success: false }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 login attempts
+  message: { error: 'Too many authentication attempts. Please wait 15 minutes.', success: false }
+});
+
+// ============================================
+// Authentication Middleware
+// ============================================
+const bcrypt = require('bcryptjs');
+
+// PIN Manager
+class PinManager {
+  constructor() {
+    this.hashedPin = process.env.PIN_HASH;
+    this.authEnabled = !!this.hashedPin;
+
+    if (!this.authEnabled) {
+      console.warn('[Security] No PIN_HASH set. Authentication disabled!');
+    } else {
+      console.log('[Security] PIN authentication enabled');
+    }
+  }
+
+  async verifyPin(pin) {
+    if (!this.authEnabled) return true;
+    if (!pin || !/^\d{4,6}$/.test(pin)) return false;
+
+    try {
+      return await bcrypt.compare(pin, this.hashedPin);
+    } catch (error) {
+      console.error('[Auth] PIN verification error:', error);
+      return false;
+    }
+  }
+
+  isEnabled() {
+    return this.authEnabled;
+  }
+}
+
+const pinManager = new PinManager();
+
+// Require Authentication Middleware
+const requireAuth = (req, res, next) => {
+  if (!pinManager.isEnabled()) return next();
+
+  if (req.session && req.session.authenticated) {
+    // Check 15-minute inactive timeout
+    const now = Date.now();
+    const lastActivity = req.session.lastActivity || req.session.createdAt;
+    const inactiveTimeout = 15 * 60 * 1000; // 15 minutes
+
+    if (now - lastActivity > inactiveTimeout) {
+      req.session.destroy();
+      return res.status(401).json({
+        error: 'Session expired due to inactivity',
+        success: false,
+        requiresAuth: true
+      });
+    }
+
+    req.session.lastActivity = Date.now();
+    return next();
+  }
+
+  return res.status(401).json({
+    error: 'Authentication required',
+    success: false,
+    requiresAuth: true
+  });
+};
+
 // Logging middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - ${req.ip}`);
   next();
 });
 
-// API Routes
+// ============================================
+// Authentication Routes (Public)
+// ============================================
+
+/**
+ * POST /api/auth/login
+ * Authenticate with PIN
+ */
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { pin } = req.body;
+
+    if (!pin) {
+      return res.status(400).json({
+        error: 'PIN is required',
+        success: false
+      });
+    }
+
+    // Verify PIN
+    const isValid = await pinManager.verifyPin(pin);
+
+    if (!isValid) {
+      console.warn(`[Auth] Failed login attempt from ${req.ip}`);
+      return res.status(401).json({
+        error: 'Invalid PIN',
+        success: false
+      });
+    }
+
+    // Create session
+    req.session.authenticated = true;
+    req.session.createdAt = Date.now();
+    req.session.lastActivity = Date.now();
+    req.session.ip = req.ip;
+
+    console.log(`[Auth] Successful login from ${req.ip}`);
+
+    res.json({
+      success: true,
+      message: 'Authentication successful'
+    });
+
+  } catch (error) {
+    console.error('[Auth] Login error:', error);
+    res.status(500).json({
+      error: 'Authentication failed',
+      success: false
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ * Destroy session
+ */
+app.post('/api/auth/logout', (req, res) => {
+  if (req.session) {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('[Auth] Logout error:', err);
+        return res.status(500).json({
+          error: 'Logout failed',
+          success: false
+        });
+      }
+
+      res.clearCookie('wol.sid');
+      res.json({
+        success: true,
+        message: 'Logged out successfully'
+      });
+    });
+  } else {
+    res.json({
+      success: true,
+      message: 'No active session'
+    });
+  }
+});
+
+/**
+ * GET /api/auth/status
+ * Check authentication status
+ */
+app.get('/api/auth/status', (req, res) => {
+  const isAuthenticated = !!(req.session && req.session.authenticated);
+
+  res.json({
+    authenticated: isAuthenticated,
+    authEnabled: pinManager.isEnabled(),
+    sessionAge: req.session && req.session.createdAt
+      ? Date.now() - req.session.createdAt
+      : null
+  });
+});
+
+// ============================================
+// Protected API Routes
+// ============================================
 
 /**
  * POST /api/wake
- * Execute wakepc command to wake the PC
+ * Execute wake command (requires authentication)
  */
-app.post('/api/wake', (req, res) => {
+app.post('/api/wake', requireAuth, wakeLimiter, (req, res) => {
   try {
+    // Validate WAKE_CMD against whitelist
+    const commandPath = ALLOWED_COMMANDS[WAKE_CMD];
+
+    if (!commandPath) {
+      console.error(`[Wake] Invalid command: ${WAKE_CMD}`);
+      return res.status(500).json({
+        error: 'Invalid wake command configuration',
+        success: false
+      });
+    }
+
     console.log(`[Wake] Executing: ${WAKE_CMD}`);
 
-    exec(WAKE_CMD, { timeout: 5000 }, (error, stdout, stderr) => {
+    // Use execFile instead of exec for security (no shell)
+    execFile(commandPath, [], { timeout: 5000 }, (error, stdout, stderr) => {
       if (error) {
         console.error(`[Wake] Error: ${error.message}`);
         return res.status(500).json({
           success: false,
-          error: 'Failed to execute wake command',
-          details: error.message
+          error: 'Failed to execute wake command'
         });
       }
 
       console.log('[Wake] Command executed successfully');
-      console.log('[Wake] Output:', stdout);
 
       res.json({
         success: true,
-        message: `${WAKE_CMD} executed successfully`,
-        output: stdout.trim(),
+        message: `Wake signal sent successfully`,
         timestamp: new Date().toISOString()
       });
     });
   } catch (error) {
-    console.error('[API Error]', error);
+    console.error('[Wake] Unexpected error:', error);
     res.status(500).json({
       error: 'Server error',
-      details: error.message,
       success: false
     });
   }
@@ -63,61 +322,81 @@ app.post('/api/wake', (req, res) => {
 
 /**
  * GET /api/status
- * Check if PC is online (simple ICMP ping)
+ * Check if PC is online (requires authentication)
  */
-app.get('/api/status', async (req, res) => {
+app.get('/api/status', requireAuth, statusLimiter, async (req, res) => {
   try {
-    // This is a placeholder - you would need to implement actual PC detection
-    // Options:
-    // 1. Ping the PC's IP address (requires IP knowledge)
-    // 2. Check if PC is responding on a specific port
-    // 3. Use arp-scan to detect MAC address on network
-
-    const { exec } = require('child_process');
-    const pcIP = process.env.PC_IP;
-
-    if (!pcIP) {
-      return res.json({
-        online: null,
-        message: 'PC_IP not configured',
-        note: 'Set PC_IP environment variable to enable status checks'
+    if (!PC_IP) {
+      return res.status(400).json({
+        success: false,
+        error: 'PC_IP not configured',
+        online: null
       });
     }
 
-    // Try to ping the PC
-    const cmd = process.platform === 'win32'
-      ? `ping -n 1 -w 1000 ${pcIP}`
-      : `ping -c 1 -W 1000 ${pcIP}`;
+    // ============================================
+    // SECURITY: Validate IP address format
+    // ============================================
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(PC_IP)) {
+      console.error(`[Status] Invalid IP format: ${PC_IP}`);
+      return res.status(400).json({
+        error: 'Invalid PC_IP configuration',
+        success: false,
+        online: null
+      });
+    }
 
-    exec(cmd, (error) => {
+    // Additional validation: each octet must be 0-255
+    const octets = PC_IP.split('.').map(Number);
+    if (octets.some(o => o < 0 || o > 255)) {
+      console.error(`[Status] IP octets out of range: ${PC_IP}`);
+      return res.status(400).json({
+        error: 'Invalid PC_IP configuration',
+        success: false,
+        online: null
+      });
+    }
+
+    // ============================================
+    // Use execFile with separate arguments (no shell)
+    // ============================================
+    const pingCmd = process.platform === 'win32' ? 'ping' : 'ping';
+    const pingArgs = process.platform === 'win32'
+      ? ['-n', '1', '-w', '1000', PC_IP]
+      : ['-c', '1', '-W', '1', PC_IP];
+
+    execFile(pingCmd, pingArgs, { timeout: 3000 }, (error) => {
+      const isOnline = !error;
+
       res.json({
-        online: !error,
-        ip: pcIP,
+        success: true,
+        online: isOnline,
+        ip: PC_IP,
         timestamp: new Date().toISOString()
       });
     });
   } catch (error) {
+    console.error('[Status] Unexpected error:', error);
     res.status(500).json({
       error: 'Failed to check status',
-      success: false
+      success: false,
+      online: null
     });
   }
 });
 
 /**
  * GET /api/health
- * Health check endpoint
+ * Health check endpoint (public, does not expose config)
  */
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '1.0.0',
+    version: '2.0.0',
     timestamp: new Date().toISOString(),
-    config: {
-      wakeCommand: WAKE_CMD,
-      useShellCmd: USE_SHELL_CMD,
-      pcIpConfigured: !!process.env.PC_IP
-    }
+    authEnabled: pinManager.isEnabled()
+    // Note: Do NOT expose: wakeCommand, pcIp, or other config
   });
 });
 
@@ -141,16 +420,21 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`\n🚀 WoL Server running on http://localhost:${PORT}`);
+  console.log(`\n🔐 Security Status:`);
+  console.log(`   Authentication: ${pinManager.isEnabled() ? '✅ Enabled (PIN required)' : '⚠️  Disabled'}`);
+  console.log(`   Rate Limiting: ✅ Enabled (5 wake/min, 30 status/min, 5 auth/15min)`);
+  console.log(`   CORS: ✅ Restricted to allowed origins`);
+  console.log(`   Security Headers: ✅ Helmet enabled`);
   console.log(`\n📋 Configuration:`);
   console.log(`   Wake Command: ✅ ${WAKE_CMD}`);
-  console.log(`   PC IP Address: ${process.env.PC_IP ? '✅ ' + process.env.PC_IP : '⚠️  Not set (status check disabled)'}`);
-  console.log(`\n📝 To customize, set environment variables:`);
-  console.log(`   export WAKE_CMD="wakepc"         # Command to execute (default)`);
-  console.log(`   export PC_IP="192.168.1.100"     # For status check (optional)`);
+  console.log(`   PC IP Address: ${PC_IP ? '✅ ' + PC_IP : '⚠️  Not set (status check disabled)'}`);
   console.log(`\n📡 Available endpoints:`);
-  console.log(`   POST /api/wake    - Execute wake command`);
-  console.log(`   GET  /api/status  - Check PC status`);
-  console.log(`   GET  /api/health  - Health check\n`);
+  console.log(`   POST /api/auth/login   - Authenticate with PIN`);
+  console.log(`   POST /api/auth/logout  - Logout`);
+  console.log(`   GET  /api/auth/status  - Check auth status`);
+  console.log(`   POST /api/wake         - Execute wake command (requires auth)`);
+  console.log(`   GET  /api/status       - Check PC status (requires auth)`);
+  console.log(`   GET  /api/health       - Health check\n`);
 });
 
 // Handle graceful shutdown

@@ -1,35 +1,36 @@
 #!/usr/bin/env node
 
 /**
- * Generate PWA icons from SVG
+ * Generate PWA icons from PNG source
  * Usage: node scripts/generate-icons.js
  */
 
 const fs = require('fs');
 const path = require('path');
 
-// Try to use sharp if available, otherwise use a simple method
 try {
   const sharp = require('sharp');
 
-  const svgPath = path.join(__dirname, '../public/icon.svg');
+  const sourceLogo = path.join(__dirname, '../public/onoff-high-resolution-logo.png');
   const publicDir = path.join(__dirname, '../public');
 
-  if (!fs.existsSync(svgPath)) {
-    console.error('❌ icon.svg not found');
+  if (!fs.existsSync(sourceLogo)) {
+    console.error('❌ onoff-high-resolution-logo.png not found');
     process.exit(1);
   }
 
   const sizes = [192, 512];
-  const svgContent = fs.readFileSync(svgPath, 'utf8');
 
-  console.log('🎨 Generating PWA icons...\n');
+  console.log('🎨 Generating PWA icons from PNG logo...\n');
 
   Promise.all(
     sizes.map(size =>
-      sharp(Buffer.from(svgContent))
+      sharp(sourceLogo)
+        .resize(size, size, {
+          fit: 'contain',
+          background: { r: 102, g: 126, b: 234, alpha: 1 } // #667eea background
+        })
         .png()
-        .resize(size, size)
         .toFile(path.join(publicDir, `icon-${size}.png`))
         .then(info => {
           console.log(`✅ Generated icon-${size}.png (${info.size} bytes)`);
@@ -44,6 +45,7 @@ try {
     console.log('📦 Files created:');
     console.log('   - public/icon-192.png');
     console.log('   - public/icon-512.png');
+    console.log('\n📲 Ready for PWA installation!');
   }).catch(err => {
     console.error('Error:', err);
     process.exit(1);

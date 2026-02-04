@@ -16,32 +16,13 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <div class="icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="1"></circle>
-                    <path d="M12 9v6"></path>
-                    <path d="M4.22 4.22a10 10 0 0 0 0 14.14"></path>
-                    <path d="M19.78 19.78a10 10 0 0 0 0-14.14"></path>
-                </svg>
-            </div>
-            <h1>Wake PC</h1>
-            <p id="status" class="status">Ready</p>
-            <button id="wakeBtn" class="btn btn-primary">
-                <span id="wakeBtnText">Wake PC</span>
-                <span id="wakeBtnSpinner" class="spinner" style="display: none;"></span>
-            </button>
-            <button id="statusBtn" class="btn btn-secondary">Check Status</button>
+    <div class="container"></div>
 
-            <div id="message" class="message"></div>
-
-            <div class="info">
-                <small>Last wake: <span id="lastWake">Never</span></small>
-            </div>
-        </div>
-    </div>
-
+    <!-- Load all scripts in correct order -->
+    <script src="utils/storage.js"></script>
+    <script src="components/StatusCard.js"></script>
+    <script src="components/ActivityLog.js"></script>
+    <script src="auth.js"></script>
     <script src="app.js"></script>
     <script>
         // Register service worker
