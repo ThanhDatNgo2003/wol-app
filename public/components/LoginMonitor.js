@@ -9,7 +9,7 @@ class LoginMonitor {
   }
 
   async loadSessions() {
-    this.sessions = await window.app.authManager.getLoginSessions(5);
+    this.sessions = await window.app.authManager.getLoginSessions(4);
   }
 
   parseUserAgent(userAgent) {
@@ -109,7 +109,7 @@ class LoginMonitor {
       <div class="login-monitor">
         <div class="monitor-header">
           <h3>Recent Logins</h3>
-          <button class="btn-view-all" onclick="window.app.loginHistoryModal.open()">View All</button>
+          <button class="btn-view-all" id="viewAllButton">View All</button>
         </div>
         <div class="login-list">
           ${historyHtml}
@@ -123,6 +123,16 @@ class LoginMonitor {
     await this.loadSessions();
     if (this.container) {
       this.container.innerHTML = this.render();
+
+      // Attach event listener to View All button
+      const viewAllBtn = this.container.querySelector('#viewAllButton');
+      if (viewAllBtn) {
+        viewAllBtn.addEventListener('click', () => {
+          if (window.app && window.app.loginHistoryModal) {
+            window.app.loginHistoryModal.open();
+          }
+        });
+      }
     }
   }
 }

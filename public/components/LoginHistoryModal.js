@@ -6,6 +6,7 @@ class LoginHistoryModal {
   constructor() {
     this.sessions = [];
     this.isOpen = false;
+    this.modalElement = null;
   }
 
   async loadSessions(limit = 100) {
@@ -101,11 +102,11 @@ class LoginHistoryModal {
       }).join('');
 
     return `
-      <div class="login-modal-overlay" onclick="if(event.target === this) window.app.loginHistoryModal.close()">
+      <div class="login-modal-overlay" id="loginModalOverlay">
         <div class="login-modal">
           <div class="modal-header">
             <h2>Login History</h2>
-            <button class="modal-close" onclick="window.app.loginHistoryModal.close()">✕</button>
+            <button class="modal-close" id="modalCloseBtn">✕</button>
           </div>
           <div class="modal-content">
             <div class="modal-stats">
@@ -132,16 +133,37 @@ class LoginHistoryModal {
   }
 
   update() {
-    const existing = document.getElementById('loginHistoryModal');
-    if (existing) {
-      existing.remove();
+    // Create modal element once
+    if (!this.modalElement) {
+      this.modalElement = document.createElement('div');
+      this.modalElement.id = 'loginHistoryModal';
+      document.body.appendChild(this.modalElement);
     }
 
+    // Update content and visibility
+    this.modalElement.innerHTML = this.render();
+    this.modalElement.style.display = this.isOpen ? 'block' : 'none';
+
     if (this.isOpen) {
-      const modal = document.createElement('div');
-      modal.id = 'loginHistoryModal';
-      modal.innerHTML = this.render();
-      document.body.appendChild(modal);
+      // Attach close button event listener
+      const closeBtn = this.modalElement.querySelector('#modalCloseBtn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          if (window.app && window.app.loginHistoryModal) {
+            window.app.loginHistoryModal.close();
+          }
+        });
+      }
+
+      // Attach overlay click event listener (close when clicking outside modal)
+      const overlay = this.modalElement.querySelector('#loginModalOverlay');
+      if (overlay) {
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay && window.app && window.app.loginHistoryModal) {
+            window.app.loginHistoryModal.close();
+          }
+        });
+      }
     }
   }
 }
