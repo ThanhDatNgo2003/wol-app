@@ -11,6 +11,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
+// Trust Proxy (for Cloudflare/reverse proxy)
+// ============================================
+app.set('trust proxy', 1);
+
+// ============================================
 // CRITICAL: Validate environment variables
 // ============================================
 const SESSION_SECRET = process.env.SESSION_SECRET;
